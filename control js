@@ -1,0 +1,247 @@
+(function (global) {
+  const controlStorageKey = "mkay-emulator.controls.v1";
+  const emulatorControls = [
+    { id: "b", label: "B button", index: 0, key: "x", value2: "BUTTON_2" },
+    { label: "Y button", index: 1, key: "s", value2: "BUTTON_4" },
+    { id: "select", label: "Emulator Select", index: 2, key: "v", value2: "SELECT" },
+    { id: "start", label: "Start", index: 3, key: "enter", value2: "START" },
+    { id: "dpad-up", label: "D-pad up", index: 4, key: "up arrow", value2: "DPAD_UP" },
+    { id: "dpad-down", label: "D-pad down", index: 5, key: "down arrow", value2: "DPAD_DOWN" },
+    { id: "dpad-left", label: "D-pad left", index: 6, key: "left arrow", value2: "DPAD_LEFT" },
+    { id: "dpad-right", label: "D-pad right", index: 7, key: "right arrow", value2: "DPAD_RIGHT" },
+    { id: "a", label: "A button", index: 8, key: "z", value2: "BUTTON_1" },
+    { label: "X button", index: 9, key: "a", value2: "BUTTON_3" },
+    { id: "l", label: "L button", index: 10, key: "q", value2: "LEFT_TOP_SHOULDER" },
+    { id: "r", label: "R button", index: 11, key: "e", value2: "RIGHT_TOP_SHOULDER" },
+    { id: "z", label: "Z trigger", index: 12, key: "tab", value2: "LEFT_BOTTOM_SHOULDER" },
+    { label: "R2 trigger", index: 13, key: "r", value2: "RIGHT_BOTTOM_SHOULDER" },
+    { label: "Left stick press", index: 14, key: "", value2: "LEFT_STICK" },
+    { label: "Right stick press", index: 15, key: "", value2: "RIGHT_STICK" },
+    { id: "analog-right", label: "Analog right", index: 16, key: "h", value2: "LEFT_STICK_X:+1" },
+    { id: "analog-left", label: "Analog left", index: 17, key: "f", value2: "LEFT_STICK_X:-1" },
+    { id: "analog-down", label: "Analog down", index: 18, key: "g", value2: "LEFT_STICK_Y:+1" },
+    { id: "analog-up", label: "Analog up", index: 19, key: "t", value2: "LEFT_STICK_Y:-1" },
+    { id: "c-right", label: "C-button right", index: 20, key: "l", value2: "RIGHT_STICK_X:+1" },
+    { id: "c-left", label: "C-button left", index: 21, key: "j", value2: "RIGHT_STICK_X:-1" },
+    { id: "c-down", label: "C-button down", index: 22, key: "k", value2: "RIGHT_STICK_Y:+1" },
+    { id: "c-up", label: "C-button up", index: 23, key: "i", value2: "RIGHT_STICK_Y:-1" },
+    { label: "Quick save", index: 24, key: "1" },
+    { label: "Quick load", index: 25, key: "2" },
+    { label: "State slot", index: 26, key: "3" },
+    { label: "Fast forward", index: 27, key: "add" },
+    { label: "Rewind", index: 28, key: "space" },
+    { label: "Slow motion", index: 29, key: "subtract" }
+  ];
+
+  function defaultControlMappings() {
+    const mappings = {};
+    emulatorControls.forEach(function (control) {
+      if (control.id) mappings[control.id] = control.key;
+    });
+    return mappings;
+  }
+
+  function normalizeControlKey(key) {
+    if (typeof key !== "string") return null;
+    const specialKeys = {
+      ArrowUp: "up arrow",
+      ArrowDown: "down arrow",
+      ArrowLeft: "left arrow",
+      ArrowRight: "right arrow",
+      " ": "space"
+    };
+    if (Object.prototype.hasOwnProperty.call(specialKeys, key)) {
+      return specialKeys[key];
+    }
+
+    const normalized = key.toLowerCase();
+    if (/^[a-z0-9]$/.test(normalized)) return normalized;
+    if (["up arrow", "down arrow", "left arrow", "right arrow", "space", "enter", "tab",
+      "backspace", "delete"].includes(normalized)) return normalized;
+    return null;
+  }
+
+  function displayControlKey(key) {
+    const labels = {
+      "up arrow": "↑",
+      "down arrow": "↓",
+      "left arrow": "←",
+      "right arrow": "→",
+      space: "Space",
+      enter: "Enter",
+      tab: "Tab",
+      backspace: "Backspace",
+      delete: "Delete"
+    };
+    return labels[key] || key.toUpperCase();
+  }
+
+  function initialize(isEmulatorRunning) {
+    const controlsStatus = document.getElementById("controls-status");
+    const resetControlsButton = document.getElementById("reset-controls");
+    let controlMappings = defaultControlMappings();
+    let pendingControl = null;
+
+    function setControlsStatus(message, kind) {
+      controlsStatus.textContent = message;
+      controlsStatus.dataset.kind = kind || "";
+    }
+
+    function renderControlButtons() {
+      document.querySelectorAll(".control-key").forEach(function (button) {
+        const control = emulatorControls.find(function (item) {
+          return item.id === button.dataset.control;
+        });
+        if (!control) return;
+
+        const isPending = pendingControl === control.id;
+        const keyLabel = displayControlKey(controlMappings[control.id]);
+        button.textContent = isPending ? "..." : keyLabel;
+        button.setAttribute("aria-label", isPending
+          ? "Press a new key for " + control.label + ", or Escape to cancel"
+          : "Change " + control.label + " key, currently " + keyLabel);
+        button.setAttribute("aria-pressed", String(isPending));
+      });
+    }
+
+    function saveControlMappings() {
+      try {
+        global.localStorage.setItem(controlStorageKey, JSON.stringify(controlMappings));
+        return true;
+      } catch (error) {
+        setControlsStatus("Controls changed, but this browser could not save them.", "error");
+        return false;
+      }
+    }
+
+    function loadControlMappings() {
+      controlMappings = defaultControlMappings();
+      let serialized;
+      try {
+        serialized = global.localStorage.getItem(controlStorageKey);
+      } catch (error) {
+        setControlsStatus("Could not read saved controls; using defaults.", "error");
+        renderControlButtons();
+        return;
+      }
+
+      if (!serialized) {
+        renderControlButtons();
+        return;
+      }
+
+      let saved;
+      try {
+        saved = JSON.parse(serialized);
+      } catch (error) {
+        setControlsStatus("Saved controls were invalid; using defaults.", "error");
+        renderControlButtons();
+        return;
+      }
+
+      const restoredMappings = defaultControlMappings();
+      const usedKeys = new Set();
+      emulatorControls.filter(function (control) {
+        return !control.id;
+      }).forEach(function (control) {
+        const key = normalizeControlKey(control.key);
+        if (key) usedKeys.add(key);
+      });
+      const visibleControls = emulatorControls.filter(function (control) {
+        return Boolean(control.id);
+      });
+      const valid = saved && typeof saved === "object" && !Array.isArray(saved) &&
+        visibleControls.every(function (control) {
+          const key = normalizeControlKey(saved[control.id]);
+          if (!key || usedKeys.has(key)) return false;
+          usedKeys.add(key);
+          restoredMappings[control.id] = key;
+          return true;
+        });
+
+      if (!valid) {
+        setControlsStatus("Saved controls were invalid; using defaults.", "error");
+        renderControlButtons();
+        return;
+      }
+
+      controlMappings = restoredMappings;
+      renderControlButtons();
+      setControlsStatus("Saved controls restored for this browser.");
+    }
+
+    document.querySelectorAll(".control-key").forEach(function (button) {
+      button.addEventListener("click", function () {
+        pendingControl = button.dataset.control;
+        renderControlButtons();
+        const control = emulatorControls.find(function (item) {
+          return item.id === pendingControl;
+        });
+        setControlsStatus("Press a key for " + control.label + ". Press Escape to cancel.");
+      });
+    });
+
+    document.addEventListener("keydown", function (event) {
+      if (!pendingControl) return;
+      if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopPropagation();
+        pendingControl = null;
+        renderControlButtons();
+        setControlsStatus("Key change canceled.");
+        return;
+      }
+      if (event.ctrlKey || event.metaKey || event.altKey) return;
+
+      const key = normalizeControlKey(event.key);
+      if (!key) return;
+      event.preventDefault();
+      event.stopPropagation();
+
+      const duplicate = emulatorControls.find(function (control) {
+        const assignedKey = control.id ? controlMappings[control.id] : control.key;
+        return control.id !== pendingControl && assignedKey === key;
+      });
+      if (duplicate) {
+        setControlsStatus("That key is already assigned to " + (duplicate.label || "another emulator control") + ".", "error");
+        return;
+      }
+
+      controlMappings[pendingControl] = key;
+      pendingControl = null;
+      renderControlButtons();
+      if (saveControlMappings()) {
+        setControlsStatus(isEmulatorRunning()
+          ? "Controls saved. Reload the page and reopen your ROM to apply them."
+          : "Controls saved for the next game.", "success");
+      }
+    }, true);
+
+    resetControlsButton.addEventListener("click", function () {
+      pendingControl = null;
+      controlMappings = defaultControlMappings();
+      renderControlButtons();
+      if (saveControlMappings()) {
+        setControlsStatus(isEmulatorRunning()
+          ? "Default controls restored. Reload the page and reopen your ROM to apply them."
+          : "Default controls restored.", "success");
+      }
+    });
+
+    loadControlMappings();
+
+    return {
+      getEmulatorDefaults: function () {
+        const playerControls = {};
+        emulatorControls.forEach(function (control) {
+          const mapping = { value: control.id ? controlMappings[control.id] : control.key };
+          if (control.value2) mapping.value2 = control.value2;
+          playerControls[control.index] = mapping;
+        });
+        return { 0: playerControls, 1: {}, 2: {}, 3: {} };
+      }
+    };
+  }
+
+  global.MkayControls = { initialize: initialize };
+})(window);
